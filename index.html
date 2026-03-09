@@ -50,6 +50,7 @@ body{font-family:'Apple SD Gothic Neo','맑은 고딕',sans-serif;background:#f5
 .bc{background:#e0e0e0;color:#333}
 .brow{display:flex;gap:8px;margin-top:16px;justify-content:center}
 .loading{text-align:center;padding:40px;color:#999}
+.md textarea{width:100%;min-height:90px;padding:10px;border:1px solid #ddd;border-radius:10px;font-size:14px;resize:vertical;font-family:inherit}
 </style>
 </head>
 <body>
@@ -88,6 +89,35 @@ const CAPA={'1공장':20000,'2공장':80000};
 let raw=[],sorted=[],stData={},cY=new Date().getFullYear(),cM=new Date().getMonth();
 let facFilter=''; // ''=전체, '1공장', '2공장'
 
+// 핀별 메모/반납 데이터는 별도 key로 저장 (Apps Script 수정 없이 사용)
+// key: PINMEMO||제품명||기초로트
+function pinKey(p,l){ return 'PINMEMO||'+p+'||'+l; }
+
+function getPinMemo(p,l){
+  const k=pinKey(p,l);
+  const v=stData[k];
+  if(!v) return {memo:'',returned:false,returnMemo:'',updatedAt:''};
+  try{
+    const o=(typeof v==='string')?JSON.parse(v):v;
+    return {memo:o.memo||'',returned:!!o.returned,returnMemo:o.returnMemo||'',updatedAt:o.updatedAt||''};
+  }catch(e){
+    return {memo:'',returned:false,returnMemo:'',updatedAt:''};
+  }
+}
+
+async function setPinMemo(p,l,memo,returned,returnMemo){
+  const payload={
+    action:'set',
+    key:pinKey(p,l),
+    value:JSON.stringify({memo:memo||'',returned:!!returned,returnMemo:returnMemo||'',updatedAt:new Date().toISOString()})
+  };
+  const r=await fetch(GS_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const b=await r.json();
+  if(b.status!=='ok') throw new Error(b.message||'save fail');
+}
+
+function esc_(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+
 function setFacFilter(v){
   facFilter=v;
   document.querySelectorAll('.cal-tools .ft').forEach(b=>b.classList.remove('on'));
@@ -100,10 +130,11 @@ function setFacFilter(v){
 
 function openGuide(){
   const h='<h3>📘 가이드</h3>'+
-    '<div class="sub">외주용(캘린더 조회 전용)</div>'+
+    '<div class="sub">외주용(캘린더 + 핀별 메모/반납 입력)</div>'+
     '<div style="font-size:13px;line-height:1.6">'+
     '• 상단 버튼으로 전체/1공장/2공장 표시를 전환합니다.<br>'+
     '• 날짜를 누르면 그날의 상세 항목이 표시됩니다.<br>'+
+    '• 상세 항목을 누르면 <strong>메모/반납</strong>을 입력할 수 있습니다.<br>'+
     '• 🔄 동기화로 최신 데이터를 다시 불러옵니다.'+
     '</div>'+
     '<div class="brow"><button class="btn bc" onclick="clM()">닫기</button></div>';
@@ -135,8 +166,17 @@ async function loadSt(){
   const r=await fetch(GS_URL+'?action=getAll');
   const b=await r.json();
   if(b.status==='ok'&&b.data){
+    // getAll은 key/value 전체를 주지만, 이 뷰용 HTML은 기존처럼 __outsource_status__만 JSON으로 사용
     const v=b.data['__outsource_status__'];
-    if(v)stData=typeof v==='string'?JSON.parse(v):v;
+    stData={};
+    if(v){
+      const base=typeof v==='string'?JSON.parse(v):v;
+      Object.assign(stData, base);
+    }
+    // PINMEMO||... 는 getAll의 최상위 key로 들어오므로 여기서 같이 합쳐줌
+    for(const k in b.data){
+      if(k && k.startsWith('PINMEMO||')) stData[k]=b.data[k];
+    }
   }
 }
 
@@ -217,7 +257,9 @@ function rCal(){
           const items=[...info.i1.map(i=>({...i,f:'f1'})),...info.i2.map(i=>({...i,f:'f2'}))];
           items.slice(0,3).forEach(it=>{
             const nm=it.p.length>7?it.p.slice(0,7)+'…':it.p;
-            h+='<div class="cal-it '+it.f+(it.u?' urg':'')+(it.d?' done':'')+'">'+(it.u?'🚨':'')+nm+' '+it.q.toLocaleString()+'</div>';
+            const pm=getPinMemo(it.p,it.b);
+            const tag=(pm.returned?'↩':'')+(((pm.memo&&pm.memo.trim())||(pm.returnMemo&&pm.returnMemo.trim()))?'📝':'');
+            h+='<div class="cal-it '+it.f+(it.u?' urg':'')+(it.d?' done':'')+'">'+(it.u?'🚨':'')+tag+nm+' '+it.q.toLocaleString()+'</div>';
           });
           if(items.length>3)h+='<div style="font-size:8px;color:#999">+'+(items.length-3)+'</div>';
         }
@@ -227,6 +269,43 @@ function rCal(){
   }
   h+='</div>';
   document.getElementById('calG').innerHTML=h;
+}
+
+function openPinMemoEditor(p,l){
+  const st=getPinMemo(p,l);
+  const h=
+    '<h3>📝 메모 / 반납</h3>'+
+    '<div class="sub"><strong>'+p+'</strong> ('+l+')</div>'+
+    '<label style="display:flex;gap:8px;align-items:center;margin:10px 0;font-size:13px">'+
+      '<input type="checkbox" id="retChk" '+(st.returned?'checked':'')+'>'+ 
+      '<span>핀 반납함</span>'+
+    '</label>'+
+    '<div style="margin:8px 0;color:#666;font-size:12px">반납 메모</div>'+
+    '<textarea id="retMemo">'+(st.returnMemo||'')+'</textarea>'+
+    '<div style="margin:10px 0 8px;color:#666;font-size:12px">일반 메모</div>'+
+    '<textarea id="memoTxt">'+(st.memo||'')+'</textarea>'+
+    (st.updatedAt?('<div style="margin-top:8px;color:#999;font-size:11px">마지막 수정: '+st.updatedAt+'</div>'):'')+
+    '<div class="brow">'+
+      '<button class="btn bc" onclick="clM()">닫기</button>'+
+      '<button class="btn" style="background:#1565C0;color:#fff" onclick="submitPinMemo(\''+esc_(p)+'\',\''+esc_(l)+'\')">저장</button>'+
+    '</div>';
+  shM(h);
+}
+
+async function submitPinMemo(p,l){
+  try{
+    const returned=document.getElementById('retChk').checked;
+    const returnMemo=document.getElementById('retMemo').value||'';
+    const memo=document.getElementById('memoTxt').value||'';
+    setSt('☁️ 저장 중...');
+    await setPinMemo(p,l,memo,returned,returnMemo);
+    await loadSt();
+    rCal();
+    setSt('✅ 저장 완료 | '+new Date().toLocaleTimeString());
+    clM();
+  }catch(e){
+    setSt('❌ 저장 실패: '+e.message);
+  }
 }
 
 function showDay(dk){
@@ -246,9 +325,13 @@ function showDay(dk){
   h+='<div style="margin-top:10px">';
   items.forEach(it=>{
     const cl=it.fc==='1공장'?'#1565C0':'#2E7D32';
-    h+='<div style="padding:8px;margin:4px 0;border-left:3px solid '+cl+';background:#fafafa;border-radius:6px;font-size:13px">';
-    h+=(it.u?'🚨 ':'')+(it.d?'✅ ':'')+'<strong>'+it.p+'</strong> ('+it.b+') <span style="color:'+cl+'">'+it.q.toLocaleString()+'개</span>';
-    if(it.e)h+=' 📦'+it.e;
+    const pm=getPinMemo(it.p,it.b);
+    const hasMemo=(pm.memo&&pm.memo.trim())||(pm.returnMemo&&pm.returnMemo.trim());
+    const badges=(pm.returned?' <span style="font-size:12px;color:#D32F2F">↩반납</span>':'')+(hasMemo?' <span style="font-size:12px;color:#555">📝</span>':'');
+
+    h+='<div onclick="openPinMemoEditor(\''+esc_(it.p)+'\',\''+esc_(it.b)+'\')" style="padding:10px;margin:6px 0;border-left:3px solid '+cl+';background:#fafafa;border-radius:10px;font-size:13px;cursor:pointer">';
+    h+=(it.u?'🚨 ':'')+(it.d?'✅ ':'')+'<strong>'+it.p+'</strong> ('+it.b+') <span style="color:'+cl+'">'+it.q.toLocaleString()+'개</span>'+badges;
+    if(it.e)h+=' <span style="color:#666">📦'+it.e+'</span>';
     h+='</div>';
   });
   h+='</div>';
