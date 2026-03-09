@@ -112,7 +112,12 @@ async function setPinMemo(p,l,memo,returned,returnMemo){
     value:JSON.stringify({memo:memo||'',returned:!!returned,returnMemo:returnMemo||'',updatedAt:new Date().toISOString()})
   };
   const r=await fetch(GS_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  const b=await r.json();
+  const txt=await r.text();
+  let b=null;
+  try{ b=JSON.parse(txt); }catch(e){
+    // service worker가 오프라인일 때 '오프라인 상태입니다.' 같은 텍스트를 반환할 수 있음
+    throw new Error('네트워크/오프라인 또는 응답 오류: '+txt);
+  }
   if(b.status!=='ok') throw new Error(b.message||'save fail');
 }
 
