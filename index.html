@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1565C0">
+<title>외주 핀 생산관리 (캘린더)</title>
+<link rel="manifest" href="manifest.json">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Apple SD Gothic Neo','맑은 고딕',sans-serif;background:#f5f5f5;-webkit-tap-highlight-color:transparent}
+.header{background:#1565C0;color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.header h1{font-size:15px;font-weight:700}
+.sync-btn{background:rgba(255,255,255,.2);border:none;color:#fff;padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer}
+.status-bar{padding:4px 12px;background:#E3F2FD;font-size:11px;color:#1565C0;text-align:center}
+.content{padding-bottom:14px}
+.cal-nav{display:flex;align-items:center;justify-content:center;padding:10px;background:#fff;gap:4px;position:sticky;top:48px;z-index:60;border-bottom:1px solid #e0e0e0}
+.cal-nav button{background:none;border:none;font-size:18px;padding:6px 14px;cursor:pointer;border-radius:8px}
+.cal-nav button:active{background:#e0e0e0}
+.cal-nav .month-label{font-size:15px;font-weight:700;min-width:110px;text-align:center}
+.cal-nav .today-btn{font-size:12px;padding:5px 10px;background:#e0e0e0;border-radius:14px;border:none;cursor:pointer}
+.cal-tools{display:flex;gap:6px;padding:8px 10px;background:#fff;border-bottom:1px solid #e0e0e0;position:sticky;top:94px;z-index:60}
+.ft{border:1px solid #ddd;background:#f5f5f5;border-radius:14px;padding:6px 10px;font-size:12px;cursor:pointer}
+.ft.on{background:#1565C0;color:#fff;border-color:#1565C0;font-weight:700}
+.ft.guide{margin-left:auto;background:#fff}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#ddd;margin:0 4px}
+.cal-hdr{background:#E8EAF6;text-align:center;padding:5px 0;font-size:11px;font-weight:700;color:#333}
+.cal-hdr.we{background:#FFEBEE;color:#B71C1C}
+.cal-c{background:#fff;min-height:72px;padding:3px;font-size:10px;overflow:hidden;cursor:pointer}
+.cal-c:active{background:#f0f0f0}
+.cal-c .dn{font-weight:700;font-size:12px;margin-bottom:1px}
+.cal-c.today .dn{color:#1565C0}
+.cal-c.empty{background:#f5f5f5;cursor:default}
+.capa-b{height:5px;background:#E0E0E0;border-radius:3px;margin:1px 0;overflow:hidden}
+.capa-b .fill{height:100%;border-radius:3px}
+.cal-it{font-size:9px;padding:1px 3px;margin:1px 0;border-radius:2px;border-left:2px solid;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cal-it.f1{border-left-color:#1565C0;background:#E3F2FD}
+.cal-it.f2{border-left-color:#2E7D32;background:#E8F5E9}
+.cal-it.urg{background:#FFEBEE!important}
+.cal-it.done{opacity:.4;text-decoration:line-through}
+.mo{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:200}
+.mo.on{display:flex;align-items:flex-end;justify-content:center}
+.md{background:#fff;width:100%;max-width:500px;border-radius:16px 16px 0 0;padding:20px 16px 24px;max-height:80vh;overflow-y:auto}
+.md h3{margin-bottom:10px;font-size:16px}
+.md .sub{color:#666;font-size:13px;margin-bottom:12px}
+.btn{padding:10px 18px;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer}
+.btn:active{opacity:.8}
+.bc{background:#e0e0e0;color:#333}
+.brow{display:flex;gap:8px;margin-top:16px;justify-content:center}
+.loading{text-align:center;padding:40px;color:#999}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>📆 외주 핀 생산관리</h1>
+  <button class="sync-btn" onclick="loadAll()">🔄 동기화</button>
+</div>
+<div class="status-bar" id="sbar">데이터 로드 중...</div>
+<div class="content">
+  <div class="cal-nav">
+    <button onclick="calP()">◀</button>
+    <span class="month-label" id="calLbl"></span>
+    <button onclick="calN()">▶</button>
+    <button class="today-btn" onclick="calT()">오늘</button>
+  </div>
+  <div class="cal-tools">
+    <button class="ft on" onclick="setFacFilter('')">전체</button>
+    <button class="ft" onclick="setFacFilter('1공장')">1공장</button>
+    <button class="ft" onclick="setFacFilter('2공장')">2공장</button>
+    <button class="ft guide" onclick="openGuide()">가이드</button>
+  </div>
+  <div id="calG"></div>
+</div>
+
+<div class="mo" id="mOverlay" onclick="clM(event)">
+  <div class="md" id="mContent"></div>
+</div>
+
+<script>
+// ===== 설정 (반드시 본인 값으로 변경!) =====
+const GS_URL='https://script.google.com/macros/s/AKfycbwpPGa5pvOouObcHWqwJbTQgxVQYR8qdQSWhJI38V5rBFRIdWuUZVgjQzkZ-P5bDBT1/exec';
+const WO_ID='1_3PakMet-BwSVLAgnqHN5CS336hrs-L266Rc_aIFFZI';
+// ============================================
+
+const CAPA={'1공장':20000,'2공장':80000};
+let raw=[],sorted=[],stData={},cY=new Date().getFullYear(),cM=new Date().getMonth();
+let facFilter=''; // ''=전체, '1공장', '2공장'
+
+function setFacFilter(v){
+  facFilter=v;
+  document.querySelectorAll('.cal-tools .ft').forEach(b=>b.classList.remove('on'));
+  const btns=document.querySelectorAll('.cal-tools .ft');
+  if(v==='1공장') btns[1].classList.add('on');
+  else if(v==='2공장') btns[2].classList.add('on');
+  else btns[0].classList.add('on');
+  rCal();
+}
+
+function openGuide(){
+  const h='<h3>📘 가이드</h3>'+
+    '<div class="sub">외주용(캘린더 조회 전용)</div>'+
+    '<div style="font-size:13px;line-height:1.6">'+
+    '• 상단 버튼으로 전체/1공장/2공장 표시를 전환합니다.<br>'+
+    '• 날짜를 누르면 그날의 상세 항목이 표시됩니다.<br>'+
+    '• 🔄 동기화로 최신 데이터를 다시 불러옵니다.'+
+    '</div>'+
+    '<div class="brow"><button class="btn bc" onclick="clM()">닫기</button></div>';
+  shM(h);
+}
+
+async function loadAll(){
+  setSt('☁️ 데이터 로드 중...');
+  try{
+    await Promise.all([loadWO(),loadSt()]);
+    proc();
+    rCal();
+    setSt('✅ 로드 완료 | '+sorted.length+'건 | '+new Date().toLocaleTimeString());
+  }catch(e){
+    setSt('❌ 실패: '+e.message);
+  }
+}
+
+async function loadWO(){
+  const r=await fetch(GS_URL+'?action=getWO&sheetId='+WO_ID);
+  const b=await r.json();
+  if(b.status!=='ok')throw new Error(b.message||'WO fail');
+  const rows=b.data;if(rows.length<2)throw new Error('No data');
+  const hd=rows[1].map(h=>String(h).trim());
+  raw=rows.slice(2).map(row=>{const o={};hd.forEach((h,i)=>o[h]=row[i]!==undefined?row[i]:'');return o;});
+}
+
+async function loadSt(){
+  const r=await fetch(GS_URL+'?action=getAll');
+  const b=await r.json();
+  if(b.status==='ok'&&b.data){
+    const v=b.data['__outsource_status__'];
+    if(v)stData=typeof v==='string'?JSON.parse(v):v;
+  }
+}
+
+function proc(){
+  const f=raw.filter(r=>{const l=String(r['기초로트']||'');const m=String(r['투입자재']||'');return!l.startsWith('J')&&/^[AS]/.test(m);});
+  const g={};
+  f.forEach(r=>{const k=r['제품명']+'||'+r['기초로트'];
+    if(!g[k])g[k]={'제품명':String(r['제품명']),'기초로트':String(r['기초로트']),'오더수량':0};
+    g[k]['오더수량']+=parseInt(String(r['투입수량']||'0').replace(/,/g,''))||0;
+  });
+  sorted=Object.values(g).sort((a,b)=>{const c=a['제품명'].localeCompare(b['제품명']);return c!==0?c:a['기초로트'].localeCompare(b['기초로트']);});
+}
+
+function gSt(p,l){
+  const k=p+'||'+l;
+  return stData[k]||{'현황':'','생산완료':false,'생산일자':'','입고예정일':'','긴급':false};
+}
+
+function setSt(m){document.getElementById('sbar').textContent=m;}
+
+function calP(){cM--;if(cM<0){cM=11;cY--;}rCal();}
+function calN(){cM++;if(cM>11){cM=0;cY++;}rCal();}
+function calT(){const d=new Date();cY=d.getFullYear();cM=d.getMonth();rCal();}
+
+function getSch(){
+  const sc={};
+  sorted.forEach(item=>{
+    const st=gSt(item['제품명'],item['기초로트']);
+    const fac=st['현황'],ds=st['생산일자'];
+    if(!['1공장','2공장'].includes(fac)||!ds)return;
+    if(facFilter && fac!==facFilter) return;
+
+    const cap=CAPA[fac];
+    let dates=[];
+    if(ds.includes('~')){
+      const [s,e]=ds.split('~').map(d=>new Date(d.trim()));
+      if(isNaN(s)||isNaN(e))return;
+      for(let d=new Date(s);d<=e;d.setDate(d.getDate()+1))dates.push(new Date(d));
+    }else{
+      const d=new Date(ds);if(!isNaN(d))dates.push(d);
+    }
+
+    let rem=item['오더수량'];
+    dates.forEach(day=>{
+      const dk=day.toISOString().split('T')[0];
+      if(!sc[dk])sc[dk]={'1공장':0,'2공장':0,i1:[],i2:[]};
+      const daily=Math.min(rem,cap);
+      sc[dk][fac]+=daily;
+      sc[dk][fac==='1공장'?'i1':'i2'].push({p:item['제품명'],b:item['기초로트'],q:daily,u:st['긴급'],e:st['입고예정일'],d:st['생산완료']});
+      rem-=daily;
+    });
+  });
+  return sc;
+}
+
+function rCal(){
+  document.getElementById('calLbl').textContent=cY+'년 '+(cM+1)+'월';
+  const sc=getSch(),td=new Date(),fd=new Date(cY,cM,1),sd=(fd.getDay()+6)%7,dim=new Date(cY,cM+1,0).getDate();
+  const wd=['월','화','수','목','금','토','일'];
+  let h='<div class="cal-grid">';
+  wd.forEach((w,i)=>h+='<div class="cal-hdr'+(i>=5?' we':'')+'">'+w+'</div>');
+  let day=1;
+  for(let row=0;row<6;row++){
+    if(day>dim&&row>0)break;
+    for(let col=0;col<7;col++){
+      if((row===0&&col<sd)||day>dim){h+='<div class="cal-c empty"></div>';}
+      else{
+        const dt=new Date(cY,cM,day),dk=dt.toISOString().split('T')[0];
+        const isT=dt.toDateString()===td.toDateString();
+        const info=sc[dk];
+        h+='<div class="cal-c'+(isT?' today':'')+'" onclick="showDay(\''+dk+'\')"><div class="dn">'+day+'</div>';
+        if(info){
+          ['1공장','2공장'].forEach(fc=>{
+            const q=info[fc];if(!q)return;
+            const cp=CAPA[fc],rt=q/cp*100,cl=rt>100?'#F44336':rt>=80?'#FF9800':'#4CAF50';
+            h+='<div class="capa-b"><div class="fill" style="width:'+Math.min(rt,100)+'%;background:'+cl+'"></div></div>';
+          });
+          const items=[...info.i1.map(i=>({...i,f:'f1'})),...info.i2.map(i=>({...i,f:'f2'}))];
+          items.slice(0,3).forEach(it=>{
+            const nm=it.p.length>7?it.p.slice(0,7)+'…':it.p;
+            h+='<div class="cal-it '+it.f+(it.u?' urg':'')+(it.d?' done':'')+'">'+(it.u?'🚨':'')+nm+' '+it.q.toLocaleString()+'</div>';
+          });
+          if(items.length>3)h+='<div style="font-size:8px;color:#999">+'+(items.length-3)+'</div>';
+        }
+        h+='</div>';day++;
+      }
+    }
+  }
+  h+='</div>';
+  document.getElementById('calG').innerHTML=h;
+}
+
+function showDay(dk){
+  const sc=getSch(),info=sc[dk];
+  if(!info) return;
+  const items=[...info.i1.map(i=>({...i,fc:'1공장'})),...info.i2.map(i=>({...i,fc:'2공장'}))];
+  if(!items.length) return;
+
+  let h='<h3>📆 '+dk+'</h3>';
+  ['1공장','2공장'].forEach(fc=>{
+    const q=info[fc];if(!q)return;
+    const cp=CAPA[fc],rt=(q/cp*100).toFixed(1),cl=rt>100?'#F44336':rt>=80?'#FF9800':'#4CAF50';
+    h+='<div style="margin:8px 0;padding:8px;background:#f5f5f5;border-radius:8px"><strong>'+fc+'</strong>: <span style="color:'+cl+'">'+q.toLocaleString()+'/'+cp.toLocaleString()+' ('+rt+'%)</span>';
+    h+='<div class="capa-b"><div class="fill" style="width:'+Math.min(rt,100)+'%;background:'+cl+'"></div></div></div>';
+  });
+
+  h+='<div style="margin-top:10px">';
+  items.forEach(it=>{
+    const cl=it.fc==='1공장'?'#1565C0':'#2E7D32';
+    h+='<div style="padding:8px;margin:4px 0;border-left:3px solid '+cl+';background:#fafafa;border-radius:6px;font-size:13px">';
+    h+=(it.u?'🚨 ':'')+(it.d?'✅ ':'')+'<strong>'+it.p+'</strong> ('+it.b+') <span style="color:'+cl+'">'+it.q.toLocaleString()+'개</span>';
+    if(it.e)h+=' 📦'+it.e;
+    h+='</div>';
+  });
+  h+='</div>';
+  h+='<div class="brow"><button class="btn bc" onclick="clM()">닫기</button></div>';
+  shM(h);
+}
+
+function shM(h){document.getElementById('mContent').innerHTML=h;document.getElementById('mOverlay').classList.add('on');}
+function clM(e){if(e&&e.target&&e.target.id!=='mOverlay')return;document.getElementById('mOverlay').classList.remove('on');}
+
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+loadAll();
+</script>
+</body>
+</html>
