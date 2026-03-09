@@ -111,14 +111,14 @@ async function setPinMemo(p,l,memo,returned,returnMemo){
     key:pinKey(p,l),
     value:JSON.stringify({memo:memo||'',returned:!!returned,returnMemo:returnMemo||'',updatedAt:new Date().toISOString()})
   };
-  const r=await fetch(GS_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  const txt=await r.text();
-  let b=null;
-  try{ b=JSON.parse(txt); }catch(e){
-    // service worker가 오프라인일 때 '오프라인 상태입니다.' 같은 텍스트를 반환할 수 있음
-    throw new Error('네트워크/오프라인 또는 응답 오류: '+txt);
-  }
-  if(b.status!=='ok') throw new Error(b.message||'save fail');
+  // CORS/네트워크 환경에서 POST 응답을 읽지 못하는 경우가 있어, "전송만" 수행합니다.
+  // 저장 성공 여부는 저장 후 loadSt()로 다시 불러와 화면에서 확인합니다.
+  await fetch(GS_URL,{
+    method:'POST',
+    mode:'no-cors',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify(payload)
+  });
 }
 
 function esc_(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
@@ -304,6 +304,8 @@ async function submitPinMemo(p,l){
     const memo=document.getElementById('memoTxt').value||'';
     setSt('☁️ 저장 중...');
     await setPinMemo(p,l,memo,returned,returnMemo);
+    // 저장 반영에 약간 시간이 걸릴 수 있어 짧게 대기 후 재조회
+    await new Promise(r=>setTimeout(r,800));
     await loadSt();
     rCal();
     setSt('✅ 저장 완료 | '+new Date().toLocaleTimeString());
